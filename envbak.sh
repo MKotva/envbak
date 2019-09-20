@@ -60,13 +60,17 @@ delete()
 		if "$hasConfig" ; then # If command have setted exact config files to remove.
 			for config in "${configs[@]}"
 			do
-				makeLog "Deleting $congif.."
-				sed -i "$(grep -n "^$config$" ./store.conf | cut -f 1 -d :)d" ./store.conf # Remove exact configs
+				makeLog "Deleting $config.."
+				if grep -q "^$config$" "./store.conf" ; then
+					sed -i "$(grep -n "^$config$" ./store.conf | cut -f 1 -d :)d" ./store.conf # Remove exact configs
+				else
+					makeLog "Config $config is not in ./store.conf!"
+				fi
 			done
 		else # Remove whole record about utility with all configs
 			if  grep -q "^Util:$1:" ./store.conf ; then # If record about utility is in store.conf
 				startOfSec=$(grep -n "Util:$1:" ./store.conf| cut -f 1 -d :) # Line where is start of record (Util:[NAME]:<PATH>)
-				endOfSec=$(cat ./store.conf | tail -n +"$(($startOfSec + 1 ))" | grep -n -m 1 "Util:"| cut -f 1 -d :) # Begin of next record
+				endOfSec=$(tail -n +"$(($startOfSec + 1 ))" ./store.conf | grep -n -m 1 "Util:"| cut -f 1 -d :) # Begin of next record
 				if [ "$endOfSec" != "" ]; then  # If the record is not last in conf
 					makeLog "Deleting $1 and all config files from line $startOfSec to $endOfSec.."
 					sed -i "$startOfSec,$(($endOfSec + $startOfSec - 1)) d" ./store.conf # Remove lines in range
@@ -74,6 +78,8 @@ delete()
 					makeLog "Because this was last utility, deleting whole ./store.conf.." 
 					rm ./store.conf 
 				fi
+			else
+				makeLog "Record $1 is not in ./store.conf!"
 			fi
 		fi
 		makeLog "Deleting finished." 
@@ -91,7 +97,7 @@ backup()
 		mkdir -p "$1/.storeConfig" # Create directory with archive name and hidden subdirectory .storeConfig for .conf file
 		
 		if $2 ; then # If user use config file created by his own.
-			makeLog "Copying $3 cofig to archive subdir .storeConfig.."
+			makeLog "Copying $3 config to archive subdir .storeConfig.."
 			cp -iu "$3" "./$1/.storeConfig/" # $3 is path to config from user
 		else
 			makeLog "Copying defaul config to archive subdir .storeConfig.."
@@ -135,7 +141,7 @@ copy()
 {
 	makeLog "Copying $2 to $3.."
 	if $preserve; then
-		if [ -z $group ] ; then
+		if [ -z "$group" ] ; then
 			makeLog "Changing owner user:$user group:$group.."
 			chown "$user:$group" "$3"
 		else
@@ -151,6 +157,7 @@ restore()
 	makeLog "Restoring.." 
 	IsNoError=true
 	if $updateSys ; then
+		makeLog "Updating system.."
 		sudo pacman -Syu # Update system
 	fi
 	makeLog "Unpaking $1 archive.." 
@@ -158,7 +165,7 @@ restore()
 	
 	nameOfArchive=$(echo "$1" | awk -F/ '{print $NF}') # Get name of archive from path
 	nameOfUntaredArchive="./$(echo "$nameOfArchive" | cut -f 1 -d .)" # Get name of untar archive
-	cd "$nameOfUntaredArchive"
+	cd "$nameOfUntaredArchive" || exit 2
 	find . -type f -print0 | xargs -0 sed -i "s|^/home/.*/|/home/$user/|" # Change name of user in paths of configs.
 
 	while IFS= read -r line
@@ -178,11 +185,11 @@ restore()
 				fi
                         elif $IsNoError ; then # If the util where succesfully installed
 				nameOfFile=$(echo "$line" | awk -F/ '{print $NF}')
-				copy $nameOfUtil $nameOfFile $line
+				copy "$nameOfUtil" "$nameOfFile" "$line"
                         fi
 
 	done < "./.storeConfig/store.conf"
-	cd ..
+	(cd ..)
 	makeLog "Removing temporary archive.."
 	rm -r "$nameOfUntaredArchive"
 	makeLog "Restoring finished."
@@ -259,9 +266,9 @@ do
 
 			 -b |--backup )
 				encrease
-                	        if [ $(($# - $counter)) == 1 ]; then
-                	                checkIfPathExist "${args[$($counter + 1)]}"
-                	                backup "${args[$counter]}" true "${args[$($counter + 1)]}"
+                	        if [ $(($# - $counter)) == 2 ]; then
+                	                checkIfPathExist "${args[$(($counter + 1))]}"
+                	                backup "${args[$counter]}" true "${args[$(($counter + 1))]}"
                 	        else
                 	                backup "${args[$counter]}" false
                 	        fi
@@ -291,10 +298,18 @@ do
 
 		 	 -o |--owner )
 				encrease
-				user="$(cut -f 2 -d : "${args[$counter]}")"
-				if grep -q "GROUP:" "${args[$($counter + 1)]}" | cut -f 1 -d : ; then
+				if grep -q "USER:" "${args[$counter]}"
+					user="$(cut -f 2 -d : "${args[$counter]}")" ; then
+				fi
+				
+				if grep -q "GROUP:" "${args[$(($counter + 1))]}" ; then
 					encrease
-					group="$(cut -f 2 -d : ${args[$counter]})"
+					group="$(cut -f 2 -d : "${args[$counter]}")"
+				fi
+
+				if [ "$user" = "" ] && [ "$group" = "" ]; then
+					makeLog "No USER or GROUP setted!"
+					exit 1
 				fi
 				preserve=true
 				;;
@@ -328,5 +343,5 @@ if $add; then
 elif $delete; then
 	delete "$nameOfUtil"
 elif $restore; then
-	restore $pathToArchive
+	restore "$pathToArchive"
 fi
