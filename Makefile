@@ -3,5 +3,6 @@
 check: envbak.sh
 	shellcheck $< 
 
-clean: 
-	rm -v !("LICENSE"|"README.md"|"envbak.sh"|"Makefile")
+clean:
+	find . -type f -not -name 'envbak.sh' -not -name 'Makefile' -not -name 'README.md' -not -name 'LICENSE' -delete
+	find . -type d -not -name '.git' -delete
