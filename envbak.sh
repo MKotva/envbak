@@ -1,9 +1,44 @@
 #!/bin/bash
-set -x
+#set -eux
 
 help()
 {
-	echo -e "Name of config: store.conf\nInstallScript is tool for easier making up your userspace, when you want to save\nyour userspace from other system. If you want to save your utilities and their's\nconfig files, you can use implemented methods, or just create config file in\nscript folder in format:\n \nUtil:[NAME]\n[PathToConfig]\n[PathToConfig]\n...\n\nImplemented methods:\n-a or -add in format: -a [UtilityName] and optionaly -c [PathToConfig].\nYou can also set multiple paths separated by space.\n\n-d --delete [UtilityName] when you want remove all records about this utility\nand optionaly use -c [PathToConfig], to remove just one.\n\nWhen you've added all configs and utils, just use -b or --backup [NAME] \n<[YOURSCONFIG]> to make .tar archive in script folder.Your's config is path\nto other config then default.\n-m or --manager [PATHTOSHELLSCRIPT] when you want use your own way how to\ninstall utility.\n\n-b use as last.\n\n When you move .tar to new system, call\n-r or --restore [PathToArchive]\n-u or --update if you want update your system before restoring.\n-o or --owner [USER:NAME] or [GROUP:NAME] or both to change owner of configs\n-l or --log [NAME] creates log file \n-s or --silence to dont show progress."
+	echo -e "envbak is a simple tool for easier conservation of the user-space. It is
+useful if you want to backup your user-space configuration and then restore it
+on another system. It is driven by simple instruction file that describes which
+utilities to backup (among corresponding configuration files). One can specify
+their own instruction file by hand, or can take advantage of envbak commands to
+assemble the instruction file (see below). The instruction file has the
+following format:
+
+Util:[NAME]
+[PathToConfig]
+[PathToConfig]
+...
+
+COMMANDS FOR INSTRUCTION FILE ASSEMBLING:
+-a or -add in format: -a [UtilityName] and optionaly -c [PathToConfig].  You
+can also set multiple paths separated by space.
+
+-d --delete [UtilityName] when you want remove all records about this utility
+and optionaly use -c [PathToConfig], to remove just one.
+
+BACKUP COMMANDS:
+When you are done with the instruction file, just use -b or --backup [Name]
+<[Config]> to make .tar archive in current working directory. If specified,
+Config is used as path to the instruction file, otherwise the default value
+"store.conf" is used. This option must be always the last on the option list.
+
+-m or --manager [PathToShellScript] when you want use your own way how to
+install utility (e.g. custom install shell-script).
+
+RESTORE COMMANDS:
+When you move the .tar archive to the target system, specify:
+-r or --restore [PathToArchive]
+-u or --update if you want update your system before restoring
+-o or --owner [USER:Name] or [GROUP:Name] or both to change owner of target config files
+-l or --log [Name] to create log file in current working directory
+-s or --silence not to show any progress."
 }
 
 insertConfig()
@@ -56,7 +91,7 @@ add()
 delete()
 {
 	makeLog "Deleting.."
-	if [ -f "./store.conf" ]; then # If config file exist 
+	if [ -f "./store.conf" ]; then # If instruction file exist 
 		if "$hasConfig" ; then # If command have setted exact config files to remove.
 			for config in "${configs[@]}"
 			do
@@ -84,7 +119,7 @@ delete()
 		fi
 		makeLog "Deleting finished." 
 	else
-		makeLog "Config doesn't exists!"
+		makeLog "Instruction file doesn't exists!"
 		exit 1
 	fi	
 }
@@ -98,7 +133,7 @@ backup()
 		
 		if $2 ; then # If user use config file created by his own.
 			makeLog "Copying $3 config to archive subdir .storeConfig.."
-			cp -iu "$3" "./$1/.storeConfig/" # $3 is path to config from user
+			cp -iu "$3" "./$1/.storeConfig/store.conf" # $3 is path to config from user
 		else
 			makeLog "Copying defaul config to archive subdir .storeConfig.."
 			cp -iu "./store.conf" "./$1/.storeConfig/" # Use default config created by this script in default folder (where script is used)
@@ -133,7 +168,7 @@ backup()
 	        rm -rf "./$1"
 		makeLog "Backup finished, created $1.tar archive." 
 	else
-		makeLog "No config file founded!"
+		makeLog "No instruction file founded!"
 	fi
 }
 
@@ -143,13 +178,13 @@ copy()
 	if $preserve; then
 		if [ -z "$group" ] ; then
 			makeLog "Changing owner user:$user group:$group.."
-			chown "$user:$group" "$3"
+			sudo chown "$user:$group" "./$1/$2"
 		else
 			makeLog "Changing owner user:$user.."
-			chown "$user" "$3"
+			sudo chown "$user" "./$1/$2"
 		fi
 	fi
-	cp -iuar "./$1/$2" "$3" 
+	sudo cp -iuar "./$1/$2" "$3" 
 }
 
 restore()
@@ -166,7 +201,7 @@ restore()
 	nameOfArchive=$(echo "$1" | awk -F/ '{print $NF}') # Get name of archive from path
 	nameOfUntaredArchive="./$(echo "$nameOfArchive" | cut -f 1 -d .)" # Get name of untar archive
 	cd "$nameOfUntaredArchive" || exit 2
-	find . -type f -print0 | xargs -0 sed -i "s|^/home/.*/|/home/$user/|" # Change name of user in paths of configs.
+	find . -type f -print0 | xargs -0 sed -i "s|^/home/.*/|/home/$actualUser/|" # Change name of user in paths of configs.
 
 	while IFS= read -r line
 	do
@@ -177,7 +212,7 @@ restore()
 					
 				if [ -z "$pathToInstallMethod" ] ; then # If path to installScript is null, use default way to install utility
 					makeLog "Using pacman for $nameOfUtil installation.."
-					sudo pacman -S "$nameOfUtil" || IsNoError=false  #If pacman can't install util, skip all configs for this util.
+					sudo pacman -S --noconfirm "$nameOfUtil" || IsNoError=false  #If pacman can't install util, skip all configs for this util.
 				else
 					nameOfInstallMethod=$(echo "$pathToInstallMethod" | awk -F/ '{print $NF}') # Use own way to install util in installScript
 					makeLog "Using $nameOfInstallMethod for $nameOfUtil installation.. "
@@ -188,10 +223,10 @@ restore()
 				copy "$nameOfUtil" "$nameOfFile" "$line"
                         fi
 
-	done < "./.storeConfig/store.conf"
-	(cd ..)
+	done < "./.storeConfig/store.conf" 
+	cd ..
 	makeLog "Removing temporary archive.."
-	rm -r "$nameOfUntaredArchive"
+	rm -rf "$nameOfUntaredArchive"
 	makeLog "Restoring finished."
 }
 
@@ -266,6 +301,10 @@ do
 
 			 -b |--backup )
 				encrease
+				if $(ls -1 | grep -q "${args[$counter]}"); then
+					makeLog "Archive with this name already exist!"
+					exit 1
+				fi
                 	        if [ $(($# - $counter)) == 2 ]; then
                 	                checkIfPathExist "${args[$(($counter + 1))]}"
                 	                backup "${args[$counter]}" true "${args[$(($counter + 1))]}"
@@ -298,13 +337,13 @@ do
 
 		 	 -o |--owner )
 				encrease
-				if grep -q "USER:" "${args[$counter]}"
-					user="$(cut -f 2 -d : "${args[$counter]}")" ; then
+				if $(echo "${args[$counter]}" | grep -q "USER:" ); then
+					user="$(echo "${args[$counter]}" | cut -f 2 -d :)"
 				fi
 				
-				if grep -q "GROUP:" "${args[$(($counter + 1))]}" ; then
+				if $(echo "${args[$(($counter + 1))]}" | grep -q "GROUP:") ; then
 					encrease
-					group="$(cut -f 2 -d : "${args[$counter]}")"
+					group="$(echo "${args[$counter]}" | cut -f 2 -d :)"
 				fi
 
 				if [ "$user" = "" ] && [ "$group" = "" ]; then
@@ -324,7 +363,7 @@ do
         
 		 	 -r |--restore )
 				encrease
-				user=$USER
+				actualUser=$USER
 				pathToArchive="${args[$counter]}"
 				checkIfPathExist "$pathToArchive"
 				restore=true
